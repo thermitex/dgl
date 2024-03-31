@@ -569,12 +569,14 @@ def partition_graph(
     out_path,
     num_hops=1,
     part_method="metis",
+    part_weights=None,
     balance_ntypes=None,
     balance_edges=False,
     return_mapping=False,
     num_trainers_per_machine=1,
     objtype="cut",
     graph_formats=None,
+    splitting_factor=5
 ):
     """Partition a graph for distributed training and store the partitions on files.
 
@@ -881,7 +883,14 @@ def partition_graph(
             RESERVED_FIELD_DTYPE["inner_edge"],
             F.cpu(),
         )
-    elif part_method in ("metis", "random"):
+    elif part_method in ("metis", "random", "direct"):
+        # Direct partition method only applies to partition with weights
+        if part_weights is None and part_method == 'direct':
+            # Defaults to metis
+            part_method = 'metis'
+        elif part_weights is not None:
+            assert np.sum(part_weights) == num_parts
+
         start = time.time()
         sim_g, balance_ntypes = get_homogeneous(g, balance_ntypes)
         print(
@@ -892,37 +901,79 @@ def partition_graph(
         if part_method == "metis":
             assert num_trainers_per_machine >= 1
             start = time.time()
-            if num_trainers_per_machine > 1:
-                # First partition the whole graph to each trainer and save the trainer ids in
-                # the node feature "trainer_id".
-                node_parts = metis_partition_assignment(
-                    sim_g,
-                    num_parts * num_trainers_per_machine,
-                    balance_ntypes=balance_ntypes,
-                    balance_edges=balance_edges,
-                    mode="k-way",
-                    objtype=objtype,
-                )
-                _set_trainer_ids(g, sim_g, node_parts)
+            if part_weights is None:
+                if num_trainers_per_machine > 1:
+                    # First partition the whole graph to each trainer and save the trainer ids in
+                    # the node feature "trainer_id".
+                    node_parts = metis_partition_assignment(
+                        sim_g,
+                        num_parts * num_trainers_per_machine,
+                        balance_ntypes=balance_ntypes,
+                        balance_edges=balance_edges,
+                        mode="k-way",
+                        objtype=objtype,
+                    )
+                    _set_trainer_ids(g, sim_g, node_parts)
 
-                # And then coalesce the partitions of trainers on the same machine into one
-                # larger partition.
-                node_parts = F.floor_div(node_parts, num_trainers_per_machine)
+                    # And then coalesce the partitions of trainers on the same machine into one
+                    # larger partition.
+                    node_parts = F.floor_div(node_parts, num_trainers_per_machine)
+                else:
+                    node_parts = metis_partition_assignment(
+                        sim_g,
+                        num_parts,
+                        balance_ntypes=balance_ntypes,
+                        balance_edges=balance_edges,
+                        objtype=objtype,
+                    )
             else:
+                # Number of trainers no longer matters in this scenario
+                # First partition the graph into smaller pieces
+                print(f'Break down into {num_parts * splitting_factor} pieces')
                 node_parts = metis_partition_assignment(
                     sim_g,
-                    num_parts,
+                    num_parts * splitting_factor,
                     balance_ntypes=balance_ntypes,
                     balance_edges=balance_edges,
                     objtype=objtype,
                 )
+
+                # Then combine the pieces approximately according to partition weights
+                pieces_taken = np.around(part_weights * splitting_factor).astype(np.int64)
+                err = num_parts * splitting_factor - np.sum(pieces_taken)
+                pieces_taken[-1] += err
+                print(f'Pieces to be taken: {pieces_taken}')
+
+                taken_mask = torch.full(node_parts.shape, False)
+                for part_id in range(len(pieces_taken)):
+                    num_pieces = pieces_taken[part_id]
+                    node_parts[~taken_mask] -= num_pieces
+                    pieces_to_take = ~taken_mask & (node_parts < 0)
+                    node_parts[pieces_to_take] = part_id
+                    taken_mask |= pieces_to_take
+                # Make sure all pieces are taken
+                assert len(node_parts[~taken_mask]) == 0
+
+                # Count nodes in parts
+                unique, counts = np.unique(node_parts, return_counts=True)
+                for i in range(len(unique)):
+                    part_id = unique[i]
+                    count = counts[i]
+                    print(f'Part {part_id} has {count} nodes')
+
             print(
                 "Assigning nodes to METIS partitions takes {:.3f}s, peak mem: {:.3f} GB".format(
                     time.time() - start, get_peak_mem()
                 )
             )
+
+        elif part_method == "random":
+            if part_weights is None:
+                node_parts = random_choice(num_parts, sim_g.num_nodes())
+            else:
+                pass
         else:
-            node_parts = random_choice(num_parts, sim_g.num_nodes())
+            pass
         start = time.time()
         parts, orig_nids, orig_eids = partition_graph_with_halo(
             sim_g, node_parts, num_hops, reshuffle=True

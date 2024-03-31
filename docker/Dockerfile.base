@@ -1,0 +1,34 @@
+# Build base:
+# docker build -t dgl-base -f Dockerfile.base .
+
+FROM ubuntu:18.04
+
+ENV TZ=US
+RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
+
+RUN apt-get update --fix-missing
+
+# Core packages
+COPY install/ubuntu_install_core.sh /install/ubuntu_install_core.sh
+RUN bash /install/ubuntu_install_core.sh
+
+# camke and other build essentials
+COPY install/ubuntu_install_build.sh /install/ubuntu_install_build.sh
+RUN bash /install/ubuntu_install_build.sh
+
+# python
+COPY install/ubuntu_install_conda.sh /install/ubuntu_install_conda.sh
+RUN bash /install/ubuntu_install_conda.sh
+
+# Fetch repo
+RUN git clone --recurse-submodules https://github.com/thermitex/dgl.git
+WORKDIR /dgl
+
+# Create env in slient mode
+RUN bash script/create_dev_conda_env.sh -c -s
+RUN echo "conda activate dgl-dev-cpu" >> ~/.bashrc
+RUN ["/bin/bash", "-i", "-c", "source ~/.bashrc"]
+
+# Remove dgl folder content
+WORKDIR /
+RUN rm -rf dgl

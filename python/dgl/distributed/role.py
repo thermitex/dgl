@@ -191,7 +191,7 @@ def init_role(role):
         PER_ROLE_RANK[role_name] = {}
         per_role_rank = 0
         for i in range(num_machines):
-            clients = machines[i]
+            clients = machines.get(i, [])
             clients = np.sort(clients)
             for client_id in clients:
                 GLOBAL_RANK[client_id] = global_rank

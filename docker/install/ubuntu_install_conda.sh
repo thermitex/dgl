@@ -12,8 +12,10 @@ wget --quiet https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.
     rm ~/miniconda.sh && \
     /opt/conda/bin/conda clean -tipy && \
     ln -s /opt/conda/etc/profile.d/conda.sh /etc/profile.d/conda.sh && \
+    ln -s /opt/conda/bin/conda /bin/conda && \
     echo ". /opt/conda/etc/profile.d/conda.sh" >> ~/.bashrc && \
-    echo "conda activate base" >> ~/.bashrc
+    echo "conda activate base" >> ~/.bashrc && \
+    conda init bash
 
 export TINI_VERSION=v0.16.1
 source ~/.bashrc

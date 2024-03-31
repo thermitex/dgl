@@ -2,6 +2,7 @@
 from collections import namedtuple
 
 import numpy as np
+import time, os, socket
 
 from .. import backend as F
 from ..base import EID, NID
@@ -490,6 +491,9 @@ def _distributed_access(g, nodes, issue_remote_req, local_access):
         The subgraph that contains the neighborhoods of all input nodes.
     """
     req_list = []
+
+    dist_tic = time.time()
+
     partition_book = g.get_partition_book()
     nodes = toindex(nodes).tousertensor()
     partition_id = partition_book.nid2partid(nodes)
@@ -518,14 +522,31 @@ def _distributed_access(g, nodes, issue_remote_req, local_access):
         src, dst, eids = local_access(
             g.local_partition, partition_book, local_nids
         )
+
+        # Sleep to simulate
+        if int(os.environ.get('DGL_SIMULATE_STRAGGLER', 0)) == 1:
+            strag_per_sample = float(os.environ.get('DGL_STRAG_PER_SAMPLE', 0))
+            # print(f'>> [{socket.gethostname()}] local samples: {len(local_nids)}')
+            strag = len(local_nids) * strag_per_sample
+            time.sleep(strag)
+
         res_list.append(LocalSampledGraph(src, dst, eids))
+
+    local_toc = time.time()
 
     # receive responses from remote machines.
     if msgseq2pos is not None:
         results = recv_responses(msgseq2pos)
         res_list.extend(results)
 
+    num_subgraph_parts = len(res_list)
+    merge_tic = time.time()
+
     sampled_graph = merge_graphs(res_list, g.num_nodes())
+
+    toc = time.time()
+    # print(f'>> [{socket.gethostname()}] {num_subgraph_parts} parts, local {local_toc-dist_tic}, merge {toc-merge_tic}, total {toc-dist_tic}')
+
     return sampled_graph
 
 

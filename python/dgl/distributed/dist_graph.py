@@ -3,6 +3,8 @@
 import gc
 
 import os
+import socket
+
 from collections import namedtuple
 from collections.abc import MutableMapping
 
@@ -350,6 +352,7 @@ class DistGraphServer(KVServer):
         )
         self.ip_config = ip_config
         self.num_servers = num_servers
+        print(f'host {socket.gethostname()} will load partition {self.part_id}')
         # Load graph partition data.
         if self.is_backup_server():
             # The backup server doesn't load the graph partition. It'll initialized afterwards.

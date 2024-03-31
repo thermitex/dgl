@@ -1,0 +1,18 @@
+# docker build -t dgl-cpu -f Dockerfile.distributed .
+FROM dgl-base:latest
+
+# Fetch repo
+RUN git clone --recurse-submodules https://github.com/thermitex/dgl.git
+WORKDIR /dgl
+
+# Build env in slient mode
+RUN bash script/create_dev_conda_env.sh -c -s
+
+# Build shared lib
+ENV DGL_HOME=/dgl
+RUN bash script/build_dgl.sh -c
+
+# Python binding
+WORKDIR /dgl/python
+RUN python setup.py install
+RUN python setup.py build_ext --inplace

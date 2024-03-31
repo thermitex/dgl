@@ -244,6 +244,7 @@ def run(args, device, data):
     epoch = 0
     epoch_time = []
     test_acc = 0.0
+    global_tic = time.time()
     for _ in range(args.num_epochs):
         epoch += 1
         tic = time.time()
@@ -256,11 +257,14 @@ def run(args, device, data):
         num_inputs = 0
         start = time.time()
         step_time = []
+        sample_duration = []
 
         with model.join():
             for step, (input_nodes, seeds, blocks) in enumerate(dataloader):
                 tic_step = time.time()
-                sample_time += tic_step - start
+                iter_sample_time = tic_step - start
+                sample_time += iter_sample_time
+                sample_duration.append(iter_sample_time)
                 # Slice feature and label.
                 batch_inputs = g.ndata["features"][input_nodes]
                 batch_labels = g.ndata["labels"][seeds].long()
@@ -296,13 +300,19 @@ def run(args, device, data):
                     )
                     sample_speed = np.mean(iter_tput[-args.log_every :])
                     mean_step_time = np.mean(step_time[-args.log_every :])
+                    mean_sample_time = np.mean(sample_duration[-args.log_every :])
                     print(
                         f"Part {g.rank()} | Epoch {epoch:05d} | Step {step:05d}"
                         f" | Loss {loss.item():.4f} | Train Acc {acc.item():.4f}"
+                        f" | Sample time {mean_sample_time:.4f}"
                         f" | Speed (samples/sec) {sample_speed:.4f}"
                         f" | GPU {gpu_mem_alloc:.1f} MB | "
                         f"Mean step time {mean_step_time:.3f} s"
                     )
+                    print(f'wt-tacc [{g.rank()}, {time.time() - global_tic}, {acc.item():.4f}]')
+                    print(f'wt-tloss [{g.rank()}, {time.time() - global_tic}, {loss.item():.4f}]')
+                    print(f'ep-tacc [{g.rank()}, {epoch}, {step}, {acc.item():.4f}]')
+                    print(f'ep-tloss [{g.rank()}, {epoch}, {step}, {loss.item():.4f}]')
                 start = time.time()
 
         toc = time.time()
@@ -312,6 +322,7 @@ def run(args, device, data):
             f" backward: {backward_time:.4f}, update: {update_time:.4f}, "
             f"#seeds: {num_seeds}, #inputs: {num_inputs}"
         )
+        print(f'epoch-st [{g.rank()}, {epoch}, {np.mean(sample_duration)}]')
         epoch_time.append(toc - tic)
 
         if epoch % args.eval_every == 0 or epoch == args.num_epochs:
@@ -330,6 +341,8 @@ def run(args, device, data):
                 f"Part {g.rank()}, Val Acc {val_acc:.4f}, "
                 f"Test Acc {test_acc:.4f}, time: {time.time() - start:.4f}"
             )
+            print(f'wt-vacc [{g.rank()}, {epoch}, {time.time() - global_tic}, {val_acc.item():.4f}]')
+            print(f'wt-tsacc [{g.rank()}, {epoch}, {time.time() - global_tic}, {test_acc.item():.4f}]')
 
     return np.mean(epoch_time[-int(args.num_epochs * 0.8) :]), test_acc
 

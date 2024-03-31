@@ -3,6 +3,7 @@ import time
 
 import dgl
 import torch as th
+import numpy as np
 from dgl.data import RedditDataset
 from ogb.nodeproppred import DglNodePropPredDataset
 
@@ -60,6 +61,9 @@ if __name__ == "__main__":
         "--part_method", type=str, default="metis", help="the partition method"
     )
     argparser.add_argument(
+        "--part_weights", nargs='*', type=float, help="the partition weights"
+    )
+    argparser.add_argument(
         "--balance_train",
         action="store_true",
         help="balance the training size in each partition.",
@@ -88,6 +92,8 @@ if __name__ == "__main__":
         help="Output path of partitioned graph.",
     )
     args = argparser.parse_args()
+
+    print(args.part_weights)
 
     start = time.time()
     if args.dataset == "reddit":
@@ -127,4 +133,7 @@ if __name__ == "__main__":
         balance_ntypes=balance_ntypes,
         balance_edges=args.balance_edges,
         num_trainers_per_machine=args.num_trainers_per_machine,
+        # New params
+        part_weights=np.array(args.part_weights) if args.part_weights is not None else None,
+        splitting_factor=8
     )
